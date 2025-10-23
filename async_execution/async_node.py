@@ -205,6 +205,114 @@ class AsyncNode(Generic[I]):
             await consumable(await self.get())
         return AsyncNode[None](wrapper(), executor=self.executor)
 
+    def peek(self, function: Consumable[I]) -> 'AsyncNode[I]':
+        """
+        Apply a synchronous side-effect function to the value without modifying it.
+
+        This method allows you to observe or log the result of the AsyncNode
+        without transforming it, similar to `peek` in Java streams or RxJava.
+
+        Parameters
+        ----------
+        function : Callable[[I], None]
+            A synchronous function that takes the computed value as input and
+            performs a side-effect (e.g., logging, debugging).
+
+        Returns
+        -------
+        AsyncNode[I]
+            A new AsyncNode containing the same value as the original,
+            unchanged.
+
+        Example
+        -------
+        ```python
+        node.peek(lambda x: print(f"Value is {x}"))
+        ```
+        """
+
+        async def wrapper() -> I:
+            value = await self.get()
+            await self._map(function, value, self.executor)
+            return value
+
+        return AsyncNode(wrapper(), executor=self.executor)
+
+    def peek_async(self, function: AsyncConsumable[I]) -> 'AsyncNode[I]':
+        """
+        Apply an asynchronous side-effect function to the value without modifying it.
+
+        This method allows you to observe or log the result of the AsyncNode
+        asynchronously, without transforming it, similar to `peek` in Java streams
+        or RxJava. The function should be an async function.
+
+        Parameters
+        ----------
+        function : Callable[[I], Awaitable[None]]
+            An asynchronous function that takes the computed value as input and
+            performs a side-effect (e.g., logging, debugging).
+
+        Returns
+        -------
+        AsyncNode[I]
+            A new AsyncNode containing the same value as the original,
+            unchanged.
+
+        Example
+        -------
+        ```python
+        async def log_value(x):
+            await asyncio.sleep(0.1)
+            print(f"Async value is {x}")
+
+        node.peek_async(log_value)
+        ```
+        """
+
+        async def wrapper() -> I:
+            value = await self.get()
+            await function(value)
+            return value
+
+        return AsyncNode(wrapper(), executor=self.executor)
+
+    # -----------------------
+    # DELAYED EXECUTION
+    # -----------------------
+
+    def wait(self, delay: float = 0.0) -> 'AsyncNode[I]':
+        """
+        Delay the completion of this AsyncNode by a specified amount of time.
+
+        This method returns a new AsyncNode that waits for the original node
+        to complete and then optionally delays the result by `delay` seconds.
+        Useful for scheduling or pacing asynchronous computations.
+
+        Parameters
+        ----------
+        delay : float, optional
+            Number of seconds to wait after the original computation completes
+            before returning the result (default is 0.0).
+
+        Returns
+        -------
+        AsyncNode[I]
+            A new AsyncNode that produces the same result as the original node
+            after the optional delay.
+
+        Example
+        -------
+        ```python
+        result = await node.wait(2.0).get()  # waits for node and then 2 more seconds
+        ```
+        """
+
+        async def wrapper() -> I:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            return await self.get()
+        return AsyncNode(wrapper(), self.executor)
+
     # -----------------------
     # ERROR HANDLING
     # -----------------------
@@ -248,6 +356,53 @@ class AsyncNode(Generic[I]):
             except Exception as ex:
                 return await handler(ex)
         return AsyncNode[I](wrapper(), executor=self.executor)
+
+    def retry(self, times: int, delay: float = 0.0) -> 'AsyncNode[I]':
+        """
+        Retry the AsyncNode computation a specified number of times if it fails.
+
+        This method attempts to execute the AsyncNode up to `times` times if
+        exceptions are raised. Optionally, a delay can be added between retries.
+        It is useful for transient errors such as network failures or temporary
+        resource contention.
+
+        Parameters
+        ----------
+        times : int
+            Maximum number of attempts before giving up.
+        delay : float, optional
+            Delay in seconds between retries (default is 0).
+
+        Returns
+        -------
+        AsyncNode[I]
+            A new AsyncNode that retries the original computation and eventually
+            returns the computed value if successful.
+
+        Raises
+        ------
+        Exception
+            If all retry attempts fail, the last exception encountered is raised.
+
+        Example
+        -------
+        ```python
+        node.retry(times=3, delay=1.0)  # retry up to 3 times with 1 second delay
+        ```
+        """
+
+        async def wrapper():
+            last_exception = None
+            for _ in range(times):
+                try:
+                    return await self.get()
+                except Exception as e:
+                    last_exception = e
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+            raise last_exception
+
+        return AsyncNode(wrapper(), executor=self.executor)
 
     # -----------------------
     # EXECUTOR MANAGEMENT
@@ -297,6 +452,65 @@ class AsyncNode(Generic[I]):
         self._cached_result = result
         return result
 
+    async def get_with_timeout(self, timeout: float) -> I:
+        """
+        Retrieve the result of the AsyncNode, but fail if it takes longer than the specified timeout.
+
+        This method wraps the regular `get()` call with a timeout using
+        `asyncio.wait_for`. If the underlying computation does not complete
+        within the given time, an `asyncio.TimeoutError` is raised.
+
+        Parameters
+        ----------
+        timeout : float
+            Maximum number of seconds to wait for the result.
+
+        Returns
+        -------
+        I
+            The computed value of the AsyncNode if it completes in time.
+
+        Raises
+        ------
+        asyncio.TimeoutError
+            If the computation does not complete within the specified timeout.
+
+        Example
+        -------
+        ```python
+        result = await node.get_with_timeout(5.0)  # waits up to 5 seconds
+        ```
+        """
+        return await asyncio.wait_for(self.get(), timeout=timeout)
+
+    def block(self) -> I:
+        """
+        Synchronously retrieve the result of the AsyncNode, blocking until it is ready.
+
+        This method allows converting an asynchronous computation into a
+        synchronous one. It runs the underlying awaitable in the current event loop
+        until completion. Use this for testing or in synchronous code that needs
+        the result immediately.
+
+        Returns
+        -------
+        I
+            The computed value of the AsyncNode.
+
+        Example
+        -------
+        ```python
+        result = node.block()  # waits for the AsyncNode to complete
+        ```
+
+        Notes
+        -----
+        - If called from within an existing running event loop (e.g., inside another
+          async function), this will raise a `RuntimeError`. In such cases, use
+          `await node.get()` instead.
+        """
+        return asyncio.get_event_loop().run_until_complete(self.get())
+
     # -----------------------
     # COMPUTATIONAL FUNCTIONS
     # -----------------------
@@ -340,6 +554,62 @@ class AsyncNode(Generic[I]):
         else:
             result = function(argument)
         return result
+
+    # -----------------------
+    # PARALLEL
+    # -----------------------
+
+    @classmethod
+    def all_of(cls, nodes: List['AsyncNode[Any]']) -> 'AsyncNode[List[Any]]':
+        """
+        Combine multiple AsyncNodes and wait for all of them to complete.
+
+        This method returns a new AsyncNode that completes when all the provided
+        AsyncNodes have completed, collecting their results into a list. This is
+        similar to `CompletableFuture.allOf` in Java.
+
+        Parameters
+        ----------
+        nodes : List[AsyncNode[Any]]
+            A list of AsyncNodes to wait for.
+
+        Returns
+        -------
+        AsyncNode[List[Any]]
+            A new AsyncNode containing a list of results from all input nodes,
+            in the same order as the input list.
+        """
+
+        async def wrapper():
+            return await asyncio.gather(*[n.get() for n in nodes])
+
+        return cls(wrapper())
+
+    @classmethod
+    def any_of(cls, nodes: List['AsyncNode[Any]']) -> 'AsyncNode[Any]':
+        """
+        Wait for the first AsyncNode to complete among multiple nodes.
+
+        This method returns a new AsyncNode that completes as soon as any one of the
+        provided AsyncNodes completes. The result of this node will be the result
+        of the first completed AsyncNode. This is similar to `CompletableFuture.anyOf` in Java.
+
+        Parameters
+        ----------
+        nodes : List[AsyncNode[Any]]
+            A list of AsyncNodes to wait for.
+
+        Returns
+        -------
+        AsyncNode[Any]
+            A new AsyncNode containing the result of the first completed input node.
+        """
+
+        async def wrapper():
+            done, _ = await asyncio.wait(*[n.get() for n in nodes], return_when=asyncio.FIRST_COMPLETED)
+            return list(done)[0].result()
+
+        return cls(wrapper())
 
     # -----------------------
     # FACTORIES
