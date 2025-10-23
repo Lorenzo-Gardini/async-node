@@ -232,7 +232,7 @@ class AsyncNode(Generic[I]):
         """
 
         async def wrapper() -> I:
-            value = await self.get()
+            value: I = await self.get()
             await self._map(function, value, self.executor)
             return value
 
@@ -270,7 +270,7 @@ class AsyncNode(Generic[I]):
         """
 
         async def wrapper() -> I:
-            value = await self.get()
+            value: I = await self.get()
             await function(value)
             return value
 
@@ -357,7 +357,7 @@ class AsyncNode(Generic[I]):
                 return await handler(ex)
         return AsyncNode[I](wrapper(), executor=self.executor)
 
-    def retry(self, times: int, delay: float = 0.0) -> 'AsyncNode[I]':
+    def retry(self, times: int, delay: float = 0.1) -> 'AsyncNode[I]':
         """
         Retry the AsyncNode computation a specified number of times if it fails.
 
@@ -392,7 +392,7 @@ class AsyncNode(Generic[I]):
         """
 
         async def wrapper():
-            last_exception = None
+            last_exception: Optional[Exception] = None
             for _ in range(times):
                 try:
                     return await self.get()
@@ -400,6 +400,39 @@ class AsyncNode(Generic[I]):
                     last_exception = e
                     if delay > 0:
                         await asyncio.sleep(delay)
+            raise last_exception
+
+        return AsyncNode(wrapper(), executor=self.executor)
+
+    def retry_backoff(self, times: int, initial_delay: float = 0.1, factor: float = 2.0) -> 'AsyncNode[I]':
+        """
+        Retry the AsyncNode computation a specified number of times using exponential backoff.
+
+        Parameters
+        ----------
+        times : int
+            Maximum number of attempts before giving up.
+        initial_delay : float, optional
+            Initial delay in seconds before the first retry (default 0.1).
+        factor : float, optional
+            Exponential factor to increase delay after each failure (default 2.0).
+
+        Returns
+        -------
+        AsyncNode[I]
+            A new AsyncNode that retries the computation with exponential backoff.
+        """
+
+        async def wrapper():
+            delay: float = initial_delay
+            last_exception: Optional[Exception] = None
+            for _ in range(times):
+                try:
+                    return await self.get()
+                except Exception as ex:
+                    last_exception = ex
+                    await asyncio.sleep(delay)
+                    delay *= factor
             raise last_exception
 
         return AsyncNode(wrapper(), executor=self.executor)
