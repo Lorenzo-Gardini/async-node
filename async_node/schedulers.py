@@ -4,7 +4,7 @@ from typing import Optional
 
 from loky import get_reusable_executor
 
-from async_execution.executors.dynamic_io_executor import IOScheduler
+from async_node.dynamic_io_executor import IOScheduler
 
 
 class Schedulers:

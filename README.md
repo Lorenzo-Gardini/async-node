@@ -5,7 +5,7 @@
 You can create nodes from values, synchronous suppliers, or synchronous runnables, for example:
 
 ```python
-from async_execution.async_node import AsyncNode
+from async_node.async_node import AsyncNode
 
 node1 = AsyncNode.from_value(10)
 node2 = AsyncNode.from_supplier(lambda: 5)
@@ -90,11 +90,11 @@ safe_node_async = node2.exceptionally_async(async_handle_exception)
 Executors can be used via `Schedulers`, and they are **singleton**, so each call returns the same instance:
 
 ```python
-from async_execution.executors.schedulers import Schedulers
+from async_node.schedulers import Schedulers
 
-io_executor = Schedulers.io()            # singleton IO-bound executor
+io_executor = Schedulers.io()  # singleton IO-bound executor
 cpu_executor = Schedulers.computation()  # singleton CPU-bound executor
-single_executor = Schedulers.single()    # singleton single-thread executor
+single_executor = Schedulers.single()  # singleton single-thread executor
 
 node_with_executor = node1.on(cpu_executor)
 node_on_main = node_with_executor.on_main_thread()
