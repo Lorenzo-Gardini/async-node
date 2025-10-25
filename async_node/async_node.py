@@ -22,7 +22,7 @@ from concurrent.futures import Executor
 from typing import Any, Generic, List, Optional, Awaitable, Union
 
 # Type aliases imported from your functional_types
-from functional_types import (
+from _functional_types import (
     I, Supplier, Function, O, Runnable, Consumable,
     AsyncFunction, AsyncRunnable, CombiningFunction,
     AsyncCombiningFunction, AsyncConsumable,
