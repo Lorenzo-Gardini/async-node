@@ -31,7 +31,7 @@ class IOScheduler(Executor):
         Number of worker threads currently idle and available to take tasks.
     """
 
-    def __init__(self, timeout: int = 20):
+    def __init__(self, timeout: int=20):
         """
         Initialize the scheduler.
 

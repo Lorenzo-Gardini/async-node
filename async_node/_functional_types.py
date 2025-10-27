@@ -34,9 +34,3 @@ type CombiningFunction[O] = Callable[..., O]
 
 # An asynchronous function that takes any number of arguments and combines them into a single output of type O
 type AsyncCombiningFunction[O] = Callable[..., Awaitable[O]]
-
-# A function that handles an Exception and returns a value of type I
-type ExceptionHandler[I] = Callable[[Exception], I]
-
-# An asynchronous function that handles an Exception and returns a value of type I
-type AsyncExceptionHandler[I] = Callable[[Exception], Awaitable[I]]

@@ -25,8 +25,7 @@ from typing import Any, Generic, List, Optional, Awaitable, Union
 from async_node._functional_types import (
     I, Supplier, Function, O, Runnable, Consumable,
     AsyncFunction, AsyncRunnable, CombiningFunction,
-    AsyncCombiningFunction, AsyncConsumable,
-    ExceptionHandler, AsyncExceptionHandler
+    AsyncCombiningFunction, AsyncConsumable
 )
 
 
@@ -53,7 +52,7 @@ class AsyncNode(Generic[I]):
     def __init__(self, future_result: Awaitable[I], executor: Optional[Executor]=None):
         self.future_result: Awaitable[I] = future_result
         self.executor: Executor = executor
-        self._cached_result: Optional[I]=None
+        self._cached_result: Optional[I] = None
 
     # -----------------------
     # OPERATORS
@@ -280,7 +279,7 @@ class AsyncNode(Generic[I]):
     # DELAYED EXECUTION
     # -----------------------
 
-    def wait(self, delay: float = 0.0) -> 'AsyncNode[I]':
+    def wait(self, delay: float=0.0) -> 'AsyncNode[I]':
         """
         Delay the completion of this AsyncNode by a specified amount of time.
 
@@ -317,7 +316,7 @@ class AsyncNode(Generic[I]):
     # ERROR HANDLING
     # -----------------------
 
-    def exceptionally(self, handler: ExceptionHandler[O]) -> Union['AsyncNode[I]', 'AsyncNode[O]']:
+    def exceptionally(self, handler: Function[Exception, O]) -> Union['AsyncNode[I]', 'AsyncNode[O]']:
         """
         Handle exceptions synchronously if the computation fails.
 
@@ -337,7 +336,7 @@ class AsyncNode(Generic[I]):
                 return await self._map(handler, ex, self.executor)
         return AsyncNode[I | O](wrapper(), executor=self.executor)
 
-    def exceptionally_async(self, handler: AsyncExceptionHandler[I]) -> 'AsyncNode[I]':
+    def exceptionally_async(self, handler: AsyncFunction[Exception, O]) -> Union['AsyncNode[I]', 'AsyncNode[O]']:
         """
         Handle exceptions asynchronously if the computation fails.
 
@@ -357,7 +356,7 @@ class AsyncNode(Generic[I]):
                 return await handler(ex)
         return AsyncNode[I](wrapper(), executor=self.executor)
 
-    def retry(self, times: int, delay: float = 0.1) -> 'AsyncNode[I]':
+    def retry(self, times: int, delay: float=0.1) -> 'AsyncNode[I]':
         """
         Retry the AsyncNode computation a specified number of times if it fails.
 
@@ -404,7 +403,7 @@ class AsyncNode(Generic[I]):
 
         return AsyncNode(wrapper(), executor=self.executor)
 
-    def retry_backoff(self, times: int, initial_delay: float = 0.1, factor: float = 2.0) -> 'AsyncNode[I]':
+    def retry_backoff(self, times: int, initial_delay: float=0.1, factor: float=2.0) -> 'AsyncNode[I]':
         """
         Retry the AsyncNode computation a specified number of times using exponential backoff.
 
@@ -543,6 +542,50 @@ class AsyncNode(Generic[I]):
           `await node.get()` instead.
         """
         return asyncio.get_event_loop().run_until_complete(self.get())
+
+    def block_with_timeout(self, timeout: float) -> I:
+        """
+        Synchronously retrieve the result of the AsyncNode, blocking up to a specified timeout.
+
+        This method allows converting an asynchronous computation into a synchronous one,
+        but will raise an exception if the computation does not complete within the
+        specified `timeout` in seconds. It wraps the `get_with_timeout` coroutine
+        and executes it in the current event loop.
+
+        Parameters
+        ----------
+        timeout : float
+            Maximum number of seconds to wait for the result.
+
+        Returns
+        -------
+        I
+            The computed value of the AsyncNode if it completes within the timeout.
+
+        Raises
+        ------
+        asyncio.TimeoutError
+            If the AsyncNode does not complete within the given timeout.
+        RuntimeError
+            If called from within a running event loop (e.g., from another async function),
+            since `run_until_complete` cannot be called from a running loop.
+
+        Example
+        -------
+        ```python
+        try:
+            result = node.block_with_timeout(5.0)  # Wait up to 5 seconds synchronously
+        except asyncio.TimeoutError:
+            print("Computation did not finish in time")
+        ```
+
+        Notes
+        -----
+        - Use this method for synchronous code that requires a blocking call with a timeout.
+        - In asynchronous contexts, prefer `await node.get_with_timeout(timeout)` instead
+          to avoid `RuntimeError`.
+        """
+        return asyncio.get_event_loop().run_until_complete(self.get_with_timeout(timeout))
 
     # -----------------------
     # COMPUTATIONAL FUNCTIONS
