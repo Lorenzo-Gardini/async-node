@@ -19,10 +19,10 @@ AsyncNode(Generic[I])
 """
 import asyncio
 from concurrent.futures import Executor
-from typing import Any, Generic, List, Optional, Awaitable, Union
+from typing import Any, Generic, Awaitable, Union
 
 # Type aliases imported from your functional_types
-from async_node._functional_types import (
+from ._functional_types import (
     I, Supplier, Function, O, Runnable, Consumable,
     AsyncFunction, AsyncRunnable, CombiningFunction,
     AsyncCombiningFunction, AsyncConsumable
@@ -45,14 +45,15 @@ class AsyncNode(Generic[I]):
     ----------
     future_result : Awaitable[I]
         The underlying awaitable computation.
-    executor : Optional[Executor]
+    executor : Executor | None
         The executor to run blocking/cpu-bound tasks, if needed.
     """
 
-    def __init__(self, future_result: Awaitable[I], executor: Optional[Executor]=None):
+    def __init__(self, future_result: Awaitable[I], executor: Executor | None=None):
         self.future_result: Awaitable[I] = future_result
         self.executor: Executor = executor
-        self._cached_result: Optional[I] = None
+        self._cached_result: I | None = None
+
 
     # -----------------------
     # OPERATORS
@@ -146,7 +147,7 @@ class AsyncNode(Generic[I]):
         AsyncNode[O]
         """
         async def wrapper() -> O:
-            values: List[Any] = await asyncio.gather(*([self.get()] + [n.get() for n in nodes]))
+            values: list[Any] = await asyncio.gather(*([self.get()] + [n.get() for n in nodes]))
             return await self._run(lambda: combine_function(*values), self.executor)
         return AsyncNode[O](wrapper(), executor=self.executor)
 
@@ -166,7 +167,7 @@ class AsyncNode(Generic[I]):
         AsyncNode[O]
         """
         async def wrapper() -> O:
-            values: List[Any] = await asyncio.gather(*([self.get()] + [n.get() for n in nodes]))
+            values: list[Any] = await asyncio.gather(*([self.get()] + [n.get() for n in nodes]))
             return await combine_function(*values)
         return AsyncNode[O](wrapper(), executor=self.executor)
 
@@ -235,7 +236,7 @@ class AsyncNode(Generic[I]):
             await self._map(function, value, self.executor)
             return value
 
-        return AsyncNode(wrapper(), executor=self.executor)
+        return AsyncNode[I](wrapper(), executor=self.executor)
 
     def peek_async(self, function: AsyncConsumable[I]) -> 'AsyncNode[I]':
         """
@@ -273,7 +274,7 @@ class AsyncNode(Generic[I]):
             await function(value)
             return value
 
-        return AsyncNode(wrapper(), executor=self.executor)
+        return AsyncNode[I](wrapper(), executor=self.executor)
 
     # -----------------------
     # DELAYED EXECUTION
@@ -310,7 +311,7 @@ class AsyncNode(Generic[I]):
             if delay > 0:
                 await asyncio.sleep(delay)
             return await self.get()
-        return AsyncNode(wrapper(), self.executor)
+        return AsyncNode[I](wrapper(), self.executor)
 
     # -----------------------
     # ERROR HANDLING
@@ -390,8 +391,8 @@ class AsyncNode(Generic[I]):
         ```
         """
 
-        async def wrapper():
-            last_exception: Optional[Exception] = None
+        async def wrapper() -> O:
+            last_exception: Exception | None = None
             for _ in range(times):
                 try:
                     return await self.get()
@@ -401,7 +402,7 @@ class AsyncNode(Generic[I]):
                         await asyncio.sleep(delay)
             raise last_exception
 
-        return AsyncNode(wrapper(), executor=self.executor)
+        return AsyncNode[O](wrapper(), executor=self.executor)
 
     def retry_backoff(self, times: int, initial_delay: float=0.1, factor: float=2.0) -> 'AsyncNode[I]':
         """
@@ -422,9 +423,9 @@ class AsyncNode(Generic[I]):
             A new AsyncNode that retries the computation with exponential backoff.
         """
 
-        async def wrapper():
+        async def wrapper() -> I:
             delay: float = initial_delay
-            last_exception: Optional[Exception] = None
+            last_exception: Exception | None = None
             for _ in range(times):
                 try:
                     return await self.get()
@@ -434,7 +435,7 @@ class AsyncNode(Generic[I]):
                     delay *= factor
             raise last_exception
 
-        return AsyncNode(wrapper(), executor=self.executor)
+        return AsyncNode[I](wrapper(), executor=self.executor)
 
     # -----------------------
     # EXECUTOR MANAGEMENT
@@ -592,14 +593,14 @@ class AsyncNode(Generic[I]):
     # -----------------------
 
     @staticmethod
-    async def _run(function: Union[Runnable, Supplier[O]], executor: Optional[Executor]=None) -> Union[None, O]:
+    async def _run(function: Union[Runnable, Supplier[O]], executor: Executor | None=None) -> Union[None, O]:
         """
         Run a function using the executor if provided, otherwise synchronously.
 
         Parameters
         ----------
         function : Callable or Supplier
-        executor : Optional[Executor]
+        executor : Executor | None
 
         Returns
         -------
@@ -611,7 +612,7 @@ class AsyncNode(Generic[I]):
             return function()
 
     @staticmethod
-    async def _map(function: Function[I, O], argument: I, executor: Optional[Executor]=None) -> O:
+    async def _map(function: Function[Any, O], argument: Any, executor: Executor | None=None) -> O:
         """
         Apply a synchronous function to an argument, optionally using an executor.
 
@@ -619,7 +620,7 @@ class AsyncNode(Generic[I]):
         ----------
         function : Callable[[I], O]
         argument : I
-        executor : Optional[Executor]
+        executor : Executor | None
 
         Returns
         -------
@@ -636,7 +637,7 @@ class AsyncNode(Generic[I]):
     # -----------------------
 
     @classmethod
-    def all_of(cls, nodes: List['AsyncNode[Any]']) -> 'AsyncNode[List[Any]]':
+    def all_of(cls, nodes: list['AsyncNode[Any]']) -> 'AsyncNode[list[Any]]':
         """
         Combine multiple AsyncNodes and wait for all of them to complete.
 
@@ -646,23 +647,23 @@ class AsyncNode(Generic[I]):
 
         Parameters
         ----------
-        nodes : List[AsyncNode[Any]]
+        nodes : list[AsyncNode[Any]]
             A list of AsyncNodes to wait for.
 
         Returns
         -------
-        AsyncNode[List[Any]]
+        AsyncNode[list[Any]]
             A new AsyncNode containing a list of results from all input nodes,
             in the same order as the input list.
         """
 
-        async def wrapper():
+        async def wrapper() -> list[Any]:
             return await asyncio.gather(*[n.get() for n in nodes])
 
-        return cls(wrapper())
+        return cls[list[Any]](wrapper())
 
     @classmethod
-    def any_of(cls, nodes: List['AsyncNode[Any]']) -> 'AsyncNode[Any]':
+    def any_of(cls, nodes: list['AsyncNode[Any]']) -> 'AsyncNode[Any]':
         """
         Wait for the first AsyncNode to complete among multiple nodes.
 
@@ -672,7 +673,7 @@ class AsyncNode(Generic[I]):
 
         Parameters
         ----------
-        nodes : List[AsyncNode[Any]]
+        nodes : list[AsyncNode[Any]]
             A list of AsyncNodes to wait for.
 
         Returns
@@ -681,43 +682,43 @@ class AsyncNode(Generic[I]):
             A new AsyncNode containing the result of the first completed input node.
         """
 
-        async def wrapper():
+        async def wrapper() -> Any:
             done, _ = await asyncio.wait(*[n.get() for n in nodes], return_when=asyncio.FIRST_COMPLETED)
             return list(done)[0].result()
 
-        return cls(wrapper())
+        return cls[Any](wrapper())
 
     # -----------------------
     # FACTORIES
     # -----------------------
 
     @classmethod
-    def from_value(cls, value: I, executor: Optional[Executor]=None) -> 'AsyncNode[I]':
+    def from_value(cls, value: I, executor: Executor | None=None) -> 'AsyncNode[I]':
         """
         Create an AsyncNode from a pre-existing value.
 
         Parameters
         ----------
         value : I
-        executor : Optional[Executor]
+        executor : Executor | None
 
         Returns
         -------
         AsyncNode[I]
         """
-        async def wrapper():
+        async def wrapper() -> I:
             return value
-        return cls(wrapper(), executor=executor)
+        return cls[I](wrapper(), executor=executor)
 
     @classmethod
-    def from_supplier(cls, supplier: Supplier[I], executor: Optional[Executor]=None) -> 'AsyncNode[I]':
+    def from_supplier(cls, supplier: Supplier[I], executor: Executor | None=None) -> 'AsyncNode[I]':
         """
         Create an AsyncNode from a synchronous supplier function.
 
         Parameters
         ----------
         supplier : Callable[[], I]
-        executor : Optional[Executor]
+        executor : Executor | None
 
         Returns
         -------
@@ -728,14 +729,14 @@ class AsyncNode(Generic[I]):
         return cls[I](async_supplier(), executor=executor)
 
     @classmethod
-    def from_runnable(cls, runnable: Runnable, executor: Optional[Executor]=None) -> 'AsyncNode[None]':
+    def from_runnable(cls, runnable: Runnable, executor: Executor | None=None) -> 'AsyncNode[None]':
         """
         Create an AsyncNode from a synchronous Runnable function.
 
         Parameters
         ----------
         runnable : Callable[[], None]
-        executor : Optional[Executor]
+        executor : Executor | None
 
         Returns
         -------
