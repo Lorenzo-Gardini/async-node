@@ -119,3 +119,49 @@ asyncio.run(main())
 ```
 
 `AsyncNode` makes it easy to manage asynchronous workflows in Python, supporting both synchronous and asynchronous functions, chaining, combination, exception handling, and optional executor usage, with lazy evaluation and caching for efficiency. `Schedulers` simplifies managing and reusing singleton executors for IO-bound, CPU-bound, or single-threaded tasks, ensuring optimal performance across different computation types.
+
+### Executor Decorators for AsyncNode
+
+You can conveniently decorate synchronous functions to run asynchronously on specific executors using the decorators:
+
+`@io`: Runs the function on the IO-bound thread pool executor.
+
+`@computation`: Runs the function on the CPU-bound thread pool executor.
+
+`@single`: Runs the function on a single-threaded executor (useful for tasks requiring serialized execution).
+
+```python
+import asyncio
+from async_node.decorators import io, computation, single
+
+@io
+def blocking_io_task(seconds: int) -> str:
+    import time
+    time.sleep(seconds)  # blocking IO simulation
+    return f"IO task slept for {seconds} seconds"
+
+@computation
+def cpu_intensive_task(n: int) -> int:
+    return sum(i * i for i in range(n))
+
+@single
+def single_thread_task(message: str) -> str:
+    return f"Single-thread says: {message}"
+
+async def main():
+    # Schedule all tasks concurrently
+    futures = [
+        blocking_io_task(2),
+        cpu_intensive_task(10_000),
+        single_thread_task("Hello from single thread"),
+    ]
+
+    # Await all results concurrently using gather
+    io_result, cpu_result, single_result = await asyncio.gather(*futures)
+
+    print(io_result)          # IO task slept for 2 seconds
+    print(f"CPU task result: {cpu_result}")  # CPU task result: sum of squares
+    print(single_result)      # Single-thread says: Hello from single thread
+
+asyncio.run(main())
+```
